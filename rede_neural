@@ -1,0 +1,132 @@
+from matplotlib import pyplot as plt
+import numpy as np
+from matplotlib.animation import FuncAnimation
+import matplotlib
+# Leitura dos dados
+arquivo = open('base200x3.txt', 'r')
+linhas = arquivo.readlines()
+arquivo.close()   
+data = []
+for linha in linhas:
+    campos = linha.replace("\n", "").split(" ")  
+    data.append(([float(campos[1]), float(campos[2]), float(campos[3])]))
+
+y1,x1,x2 = [],[],[]
+for i in data:
+    y1.append(i[2])
+    x1.append(i[0])
+    x2.append(i[1])
+p1,p2 = np.array(x1), np.array(x2)
+y = []
+for i in range(len(y1)):
+    if y1[i] == 0:
+      y.append([1, 0, 0])
+    elif y1[i] == 1:
+        y.append([0,1,0])
+    elif y1[i] == 2:
+        y.append([0,0,1])
+       
+y = np.array(y)
+
+a = p1.shape[0]  # número de amostras
+b = 1  # bias
+X = np.vstack((p1, p2))
+eta = 0.1
+#camada oculta
+w1 = np.random.uniform(-1, 1, 3)
+w2 = np.random.uniform(-1, 1, 3)
+#camada de saida
+w_saida = np.random.uniform(-1, 1, (3, 3))
+e = 100  # número de épocas
+
+def sigmoide(v):
+    return 1 / (1 + np.exp(-v))
+def sigmoide_der(v):
+    return sigmoide(v) * (1 - sigmoide(v))
+
+def softmax(x):
+    shifted_x = x - np.max(x, axis=-1, keepdims=True)
+    exp_x = np.exp(shifted_x)
+    sum_exp_x = np.sum(exp_x, axis=-1, keepdims=True)
+    probabilities = exp_x / sum_exp_x
+    return probabilities
+def cross_entropy(y_pred, y_true):
+    y_pred = np.clip(y_pred, 1e-12, 1.0)  # Evita log(0)
+    return -np.sum(y_true * np.log(y_pred))
+# Configuração da figura para a animação
+fig, ax = plt.subplots(figsize=(8, 6))
+
+# Plot dos pontos
+for i in range(len(data)):
+    if data[i][2] == 1:
+        ax.plot([data[i][0]], [data[i][1]], 'bo')
+    elif data[i][2] == 2:
+        ax.plot([data[i][0]], [data[i][1]], 'ro')
+    else:
+        ax.plot([data[i][0]], [data[i][1]], 'go')
+
+ax.set_xlim(0, 1)
+ax.set_ylim(0, 1)
+ax.set_xlabel('X1')
+ax.set_ylabel('X2')
+ax.set_title('Evolução do Perceptron')
+
+# Linha inicial (antes do treinamento)
+line1, = ax.plot([], [], 'k-', lw=2)
+line2, = ax.plot([], [], 'k-', lw=2)
+epoch_text = ax.text(0.02, 0.95, '', transform=ax.transAxes)
+
+# Função de inicialização da animação
+def init():
+    line1.set_data([], [])
+    line2.set_data([], [])
+    epoch_text.set_text('')
+    return line1,line2, epoch_text
+
+#atualizacao da animacao
+def update(frame):
+    global w1,w2,w_saida
+    erros_epoca = 0
+    for t in range(a):
+        
+        #camada oculta
+        xb = np.hstack((b, X[:, t]))
+        v1 = np.dot(xb, w1)
+        ys1 = sigmoide(v1)
+        v2 = np.dot(xb, w2)
+        ys2 = sigmoide(v2)
+        
+        #camada de saida
+        xb2 = np.array([1,ys1,ys2])
+        v3 = np.dot(w_saida, xb2)
+        ys3 = sigmoide(v3)
+        erro3 = y[t] - ys3
+        
+        #gradientes
+        ge3 = erro3 * sigmoide_der(v3)
+        ge2 = sigmoide_der(v2) * np.dot(ge3, w_saida[2, :])
+        ge1 = sigmoide_der(v1) * np.dot(ge3, w_saida[1, :])
+
+        #atualizacao
+        w1 = w1 + eta * ge1 * xb
+        w2 = w2 + eta * ge2 * xb
+        w_saida = w_saida + eta * np.outer(ge3, xb2)
+        
+        
+        
+    x_plot = np.linspace(0, 1, 100)
+    y_plot1 = -(w1[1] * x_plot + w1[0]) / w1[2]
+    y_plot2 = -(w2[1] * x_plot + w2[0]) / w2[2]
+
+    #mascara
+    mask1 = (y_plot1 >= 0) & (y_plot1 <= 1)
+    mask2 = (y_plot2 >= 0) & (y_plot2 <= 1)
+
+    line1.set_data(x_plot[mask1], y_plot1[mask1])
+    line2.set_data(x_plot[mask2], y_plot2[mask2])
+    
+    epoch_text.set_text(f'Época: {frame+1}')
+    print(erro3)
+
+anim = FuncAnimation(fig, update, frames = 5000, init_func=init, blit = False, interval=100, repeat=False)
+plt.show()
