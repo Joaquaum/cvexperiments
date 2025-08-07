@@ -1,0 +1,152 @@
+from tensorflow.keras.applications import InceptionV3
+from keras.applications.inception_v3 import preprocess_input
+from tensorflow.keras.layers import Dense, Activation, Flatten, Dropout, GlobalAveragePooling2D
+from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.optimizers import SGD, Adam
+from keras.preprocessing import image
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from os import listdir
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from scipy.spatial import distance as dist
+from sklearn.metrics.pairwise import cosine_similarity
+
+img_width, img_height = 299, 299
+NUM_EPOCHS = 5
+batchsize = 10
+
+
+base_model = InceptionV3(weights = 'imagenet',
+                         include_top = False,
+                         input_shape=(img_height, img_width, 3))
+train_dir = 'furniture_images/train'
+
+train_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input,
+    rotation_range = 90,
+    horizontal_flip = True,
+    vertical_flip = True)
+
+train_generator = train_datagen.flow_from_directory(train_dir,
+                                                    target_size = (img_height, img_width),
+                                                    batch_size = batchsize)
+
+val_dir = 'furniture_images/val'
+
+val_datagen = ImageDataGenerator(
+    preprocessing_function=preprocess_input,
+    rotation_range = 90,
+    horizontal_flip = True,
+    vertical_flip = True)
+
+val_generator = val_datagen.flow_from_directory(val_dir, 
+                                                target_size = (img_height, img_width),
+                                                batch_size = batchsize)
+
+def build_final_model(base_model, dropout, fc_layers, num_classes):
+    for layer in base_model.layers:
+        layer.trainable = False
+    x = base_model.output
+    x = GlobalAveragePooling2D()(x)
+    x = Flatten()(x)
+    
+    for fc in fc_layers:
+        x = Dense(fc, activation='relu')(x)
+        x = Dropout(dropout)(x)
+    
+    predictions = Dense(num_classes, activation = 'softmax')(x)
+    final_model = Model(inputs = base_model.input, outputs=predictions)
+    return final_model
+
+class_list = ["bike", "cars", "cats"]
+FC_LAYERS = [1024, 1024]
+dropout = 0.3
+
+final_model = build_final_model(base_model,
+                                dropout=dropout,
+                                fc_layers = FC_LAYERS,
+                                num_classes = len(class_list))
+
+adam = Adam(learning_rate=0.00001)
+
+final_model.compile(adam, loss='categorical_crossentropy', metrics=['accuracy'])
+history = final_model.fit(train_generator, epochs = NUM_EPOCHS,                                    
+                                    validation_data=val_generator,
+                                    shuffle=True
+                                   )
+
+img = image.load_img("furniture_images/test/2.jpg", target_size = (img_height, img_width))
+img_data = image.img_to_array(img)
+img_data = np.expand_dims(img_data, axis=0)
+img_data1 = preprocess_input(img_data)
+
+ptf = final_model.predict(img_data, verbose = 0)
+ptf_np = np.array(ptf)
+ptf1d = ptf_np.flatten()
+
+ptfb = base_model.predict(img_data1)
+ptfnpb = np.array(ptfb)
+ptfnpb1d = ptfnpb.flatten()
+
+print(ptf1d)
+y_prob = final_model.predict(img_data)
+
+y_classes = y_prob.argmax(axis=-1)
+
+print(y_classes)
+
+if y_classes == [0]:
+    path = 'furniture_images/val/bike'
+elif y_classes == [1]:
+    path = 'furniture_images/val/cars'
+else:
+    path = 'furniture_images/val/cats'
+
+mindist=10000
+maxcosine = 0
+i = 0
+
+for filename in os.listdir(path):
+    image_train = os.path.join(path, filename)
+    i += 1
+    imgtrain = image.load_img(image_train, target_size=(img_width, img_height))
+    img_data_train = image.img_to_array(imgtrain)
+    img_data_train = np.expand_dims(img_data_train, axis=0)
+    img_data_train = preprocess_input(img_data_train)
+    
+    pretrained_feature_train = base_model.predict(img_data_train)
+    pretrained_feature_np_train = np.array(pretrained_feature_train)
+    pretrained_feature_train1d = pretrained_feature_np_train.flatten()
+    eucldist = dist.euclidean(ptfnpb1d, pretrained_feature_train1d)
+    
+    if mindist > eucldist:
+        mindist = eucldist
+        minfilename = filename
+        
+    dot_product = np.dot(ptfnpb1d, pretrained_feature_train1d)
+    norm_y = np.linalg.norm(ptfnpb1d)
+    norm_x = np.linalg.norm(pretrained_feature_train1d)
+    cosine_similarity = dot_product / (norm_y * norm_x)
+    
+    if maxcosine < cosine_similarity:
+        maxcosine = cosine_similarity
+        cosfilename = filename
+
+image_result = os.path.join(path, minfilename)
+imgresult = image.load_img(image_train, target_size=(224, 224))
+plt.imshow(img)
+fig = plt.figure(figsize=(8,8))
+fig.add_subplot(2,2,1)
+image_result1 = os.path.join(path, minfilename)
+imgresult1 = image.load_img(image_result1, target_size=(224, 224))
+plt.imshow(imgresult1)
+eucledian5d ="%.7f" % mindist
+plt.title("Eucledian_Distance " + str(eucledian5d))
+
+fig.add_subplot(2,2,2)
+image_result2 = os.path.join(path, cosfilename)
+imgresult2 = image.load_img(image_result2, target_size=(224, 224))
+plt.imshow(imgresult2)
+cosine5d ="%.7f" % maxcosine
+plt.title("Cosine_Similarity " + str(cosine5d))
