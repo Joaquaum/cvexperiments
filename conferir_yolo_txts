@@ -1,0 +1,50 @@
+import cv2 as cv
+import os
+
+def desenhar_bounding_boxes(imagem_path, txt_path):
+    # Carrega imagem
+    img = cv.imread(imagem_path)
+    if img is None:
+        print(f"[ERRO] Imagem não encontrada: {imagem_path}")
+        return
+
+    h, w, _ = img.shape
+
+    # Lê anotações YOLO
+    if not os.path.exists(txt_path):
+        print(f"[AVISO] Arquivo de anotação não encontrado: {txt_path}")
+        return
+
+    with open(txt_path, 'r') as f:
+        linhas = f.readlines()
+
+    for linha in linhas:
+        valores = linha.strip().split()
+        if len(valores) != 5:
+            print(f"[ERRO] Formato inválido na linha: {linha}")
+            continue
+
+        classe, x_center, y_center, largura, altura = map(float, valores)
+
+        # Converte para coordenadas absolutas
+        x_center *= w
+        y_center *= h
+        largura *= w
+        altura *= h
+
+        x1 = int(x_center - largura / 2)
+        y1 = int(y_center - altura / 2)
+        x2 = int(x_center + largura / 2)
+        y2 = int(y_center + altura / 2)
+
+        # Desenha a bounding box
+        cv.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv.putText(img, f"Classe {int(classe)}", (x1, y1 - 10),
+                   cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+    # Mostra a imagem anotada
+    cv.imshow("Bounding Boxes", img)
+    cv.waitKey(0)
+    cv.destroyAllWindows()
+
+desenhar_bounding_boxes(r"C:\Users\ppgmcs\Desktop\aplicativo\imagens tratadas - final\CLASSE 1.1\imagem_1.jpg", r"C:\Users\ppgmcs\Desktop\aplicativo\txtimagens\CLASSE 1.1\imagem_1.txt")
