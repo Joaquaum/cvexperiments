@@ -1,0 +1,97 @@
+import cv2 as cv
+import numpy as np
+import os
+from sklearn.cluster import KMeans
+import matplotlib.pyplot as plt
+import re
+
+def natural_key(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
+
+def load_images_from_folder(folder):
+    images = {}
+    for filename in os.listdir(folder):
+        category = []
+        path = folder + "/" + filename
+        for cat in sorted(os.listdir(path), key=natural_key):
+            img = cv.imread(path + "/" + cat)
+            if img is not None:
+                category.append(img)
+        images[filename] = category
+    return images
+
+images = load_images_from_folder(r'C:\Users\ppgmcs\Desktop\imagens tratadas - final')
+
+def artefatos_sift(images):
+    sift_vectors = {}
+    descritor_lista = []
+    sift = cv.SIFT_create()
+    for k, value in images.items():
+        features = []
+        for img in value:
+            kp, des = sift.detectAndCompute(img, None)
+            descritor_lista.extend(des)
+            features.append(des)
+        sift_vectors[k] = features
+    return [descritor_lista, sift_vectors]
+
+sifts = artefatos_sift(images)
+lista_descritores = sifts[0]
+lista_features = sifts[1]
+
+def kmeans (k, lista_descritores):
+    kmeans = KMeans(n_clusters = k, n_init=10)
+    kmeans.fit(lista_descritores)
+    visual_word = kmeans.cluster_centers_.astype(np.float32) 
+    labels = kmeans.labels_
+    return visual_word, labels
+
+visual_words, labels = kmeans(50, lista_descritores)
+contador = 0 
+dic_hist = {}
+for classe, imagens in lista_features.items(): #cria uma lista com os histogramas para todas as imagens
+    dic_hist[classe] = {}
+    for idx, des_imagem in enumerate(imagens):
+        nmr_des_imagem = len(des_imagem)
+        labels_imagem = []
+        
+        for _ in range(nmr_des_imagem):
+            labels_imagem.append(labels[contador])
+            contador += 1
+        
+        histogram, _ = np.histogram(labels_imagem, bins=range(51))  
+        
+        dic_hist[classe][idx] = histogram
+
+plt.style.use("default")
+num_words   = len(visual_words)   
+bar_color   = "tab:gray"          
+figsize     = (8, 4)
+imagens_pontos = load_images_from_folder(r'C:\Users\ppgmcs\Desktop\algoritmos\SIFT')
+for classe, lista_imgs in imagens_pontos.items(): #plota gráficos com os histogramas de todas as imagens, e põe a imagem com os keypoints ao lado
+    classe_dir = os.path.join("histogramas_sift", classe)
+    os.makedirs(classe_dir, exist_ok=True)
+    for idx, img_bgr in enumerate(lista_imgs):
+
+        hist = dic_hist[classe][idx]
+        hist = hist / hist.sum()        
+
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+
+        img_rgb = cv.cvtColor(img_bgr, cv.COLOR_BGR2RGB)
+        axes[0].imshow(img_rgb)
+        axes[0].set_title(f"{classe}  /  img {idx}")
+        axes[0].axis("off")
+
+        axes[1].bar(range(num_words), hist, color=bar_color)
+        axes[1].set_title("Histograma de Visual Words")
+        axes[1].set_xlim([-1, num_words])
+        axes[1].set_ylim(0, 40)
+        axes[1].grid(axis="y", linestyle="--", alpha=0.4)
+        nome_arquivo = f"imagem_{idx:03}.png"
+        caminho_completo = os.path.join(classe_dir, nome_arquivo)
+
+        plt.savefig(caminho_completo)
+        plt.close(fig)
