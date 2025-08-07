@@ -1,0 +1,102 @@
+import cv2 as cv
+import numpy as np
+import os
+import re
+
+def natural_key(s):
+    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+
+
+def load_images_from_folder(folder):
+    images = {}
+    for filename in os.listdir(folder):
+        category = []
+        path = folder + "/" + filename
+        for cat in sorted(os.listdir(path), key=natural_key):
+            img = cv.imread(path + "/" + cat)
+            if img is not None:
+                category.append(img)
+        images[filename] = category
+    return images
+
+images = load_images_from_folder(r'imagens tratadas - final')
+
+clicked = False # true if mouse is pressed
+ix,iy = -1,-1
+def draw_rectangle(event,x,y,flags,param):
+    global ix,iy,clicked,lista_pontos
+
+    if event == cv.EVENT_LBUTTONDOWN and clicked == False:
+        clicked = True
+        ix,iy = x,y
+
+    elif event == cv.EVENT_LBUTTONDOWN and clicked == True:
+        cv.rectangle(img,(ix,iy),(x,y),(0,0,255), 1)
+        clicked = False
+        lista_pontos.append((ix, iy, x, y))
+            
+#    elif event == cv.EVENT_LBUTTONUP:
+#        drawing = False
+#        cv.rectangle(img,(ix,iy),(x,y),(0,0,255), 1)
+        
+        
+def pontos_formato_yolo(lista_pontos, img, classe):
+    h, w, _ = img.shape
+    lista_yolo = []
+    if classe == "CLASSE 1.1":
+        c = 0
+    elif classe == "CLASSE 1.2":
+        c = 1
+    elif classe == "CLASSE 2.1":
+        c = 2
+    elif classe == "CLASSE 2.2":
+        c = 3
+    elif classe == "CLASSE A":
+        c = 4
+    for ix, iy, x, y in lista_pontos:
+        xmin = min(x, ix)
+        ymin = min(y, iy)
+        largura = abs(x - ix)
+        altura = abs(y - iy)
+        xcenter = (xmin + largura/2)/w
+        ycenter = (ymin + altura/2)/h
+        w2 = largura/w
+        h2 = altura/h
+        lista_yolo.append((c, xcenter, ycenter, w2, h2))
+    return lista_yolo
+
+for classe, list_imgs in images.items():
+    caminho_atual = "txtimagens/" + classe
+    if not os.path.exists(caminho_atual):
+        os.makedirs(caminho_atual)
+    for i, img in enumerate(list_imgs, 1):
+        caminho_txt = os.path.join(caminho_atual, f"imagem_{i}.txt")
+        if (os.path.exists(caminho_txt)):
+            continue
+        img2 = img.copy()
+        lista_pontos = []
+        cv.namedWindow("janela")
+        cv.setMouseCallback("janela", draw_rectangle)
+        while True:
+            cv.imshow("janela", img)
+            key = cv.waitKey(1) & 0xFF
+            if key == ord('p'):
+                lista_yolo = pontos_formato_yolo(lista_pontos, img, classe)
+                with open(os.path.join(caminho_atual, f"imagem_{i}.txt"), "w") as arquivo:
+                    for c, xcenter, ycenter, w2, h2 in lista_yolo:
+                        linha_yolo = f"{c} {xcenter:.6f} {ycenter:.6f} {w2:.6f} {h2:.6f}\n"
+                        arquivo.write(linha_yolo)
+                    break
+            elif key == ord('z'):
+                lista_pontos.clear()
+                img = img2.copy()
+                cv.imshow("janela", img)
+                
+                
+            
+            elif key == ord('s'):
+                cv.destroyAllWindows()
+                exit()
+        cv.destroyAllWindows()
+        
+    
