@@ -1,0 +1,50 @@
+import numpy as np
+import cv2 as cv
+
+roi = cv.imread('roiazul.png')
+assert roi is not None, "file could not be read, check with os.path.exists()"
+hsv = cv.cvtColor(roi,cv.COLOR_BGR2HSV)
+
+target = cv.imread('dengue.jpg')
+assert target is not None, "file could not be read, check with os.path.exists()"
+hsvt = cv.cvtColor(target,cv.COLOR_BGR2HSV)
+
+# calculating object histogram
+roihist = cv.calcHist([hsv],[0, 1], None, [180, 256], [0, 180, 0, 256])
+
+# normalize histogram and apply backprojection
+cv.normalize(roihist,roihist,0,255,cv.NORM_MINMAX)
+dst = cv.calcBackProject([hsvt],[0,1],roihist,[0,180,0,256],1)
+
+# Now convolute with circular disc
+disc = cv.getStructuringElement(cv.MORPH_ELLIPSE,(5,5))
+cv.filter2D(dst,-1,disc,dst)
+
+# threshold and binary AND
+ret,thresh = cv.threshold(dst,50,255,0)
+thresh = cv.merge((thresh,thresh,thresh))
+#cv.imwrite("mascara_sem_morph.jpg", thresh)
+res = cv.bitwise_and(target,thresh)
+kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE,(5,5))
+thresh = cv.morphologyEx(thresh, cv.MORPH_CLOSE, kernel)
+thresh = cv.bitwise_not(thresh) #inverter a máscara, pois a ROI é tudo o que não for branco
+#cv.imwrite("mascara_com_morph.jpg", thresh)
+#res = np.vstack((target,thresh,res))
+thresh_gray = cv.cvtColor(thresh, cv.COLOR_BGR2GRAY)
+contornos, _ = cv.findContours(thresh_gray, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+maior = max(contornos, key = cv.contourArea)
+mascara_limpa = np.zeros_like(thresh_gray)
+cv.drawContours(mascara_limpa, [maior], -1, 255, thickness=cv.FILLED) 
+imagem_limpa = cv.bitwise_and(target, target, mask = mascara_limpa)
+cv.imshow("janela", imagem_limpa)
+cv.waitKey(0)
+cv.destroyAllWindows()
+x, y, w, h = cv.boundingRect(maior)
+recorte = imagem_limpa[y:y+h, x:x+w]
+cv.imwrite("resultado.png", recorte)
+'''dst = cv.inpaint(res, thresh_gray, 3, cv.INPAINT_TELEA)
+cv.imwrite("dst.jpg", dst)
+cv.imshow('dst',dst)
+cv.waitKey(0)
+cv.destroyAllWindows()
+'''
