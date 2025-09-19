@@ -1,94 +1,121 @@
 import cv2 as cv
 import numpy as np
 import os
-from sklearn.cluster import KMeans
-import matplotlib.pyplot as plt
-import re
-from sklearn.svm import SVC
+import torch
+from torch.utils.data import Dataset
+from PIL import Image
+from torch.utils.data import DataLoader
 
-def natural_key(s):
-    return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
+def achar_bounding_boxes(imagem, linhas_yolo):
+    coordenadas = []
+    h, w, _ = imagem.shape
+    
+    for linha in linhas_yolo:
+        valores = linha.strip().split()
+        if len(valores) != 5:
+            print(f"[ERRO] Formato inválido na linha: {linha}")
+            continue
+
+        classe, x_center, y_center, largura, altura = map(float, valores)
+
+        x_center *= w
+        y_center *= h
+        largura *= w
+        altura *= h
+
+        x1 = int(x_center - largura / 2)
+        y1 = int(y_center - altura / 2)
+        x2 = int(x_center + largura / 2)
+        y2 = int(y_center + altura / 2)
+        xmin = min(x1, x2)
+        ymin = min(y1, y2)
+        xmax = max(x1, x2)
+        ymax = max(y1,y2)
+        coordenadas.append((classe, xmin, ymin, xmax, ymax))  
+    return coordenadas
+
+def criar_dic_txt(folder):
+    dic_txt = {}
+    for classe in os.listdir(folder):
+        categoria = []
+        path = os.path.join(folder, classe)
+        for txt in os.listdir(path):
+            with open(os.path.join(path, txt), 'r')as f:
+                linhas = f.readlines()
+                categoria.append(linhas)
+        dic_txt[classe] = categoria
+    return dic_txt
 
 
-def load_images_from_folder(folder):
-    images = {}
-    for filename in os.listdir(folder):
-        if filename == "CLASSE A":
-            break
-        category = []
-        path = folder + "/" + filename
-        for cat in sorted(os.listdir(path), key=natural_key):
-            img = cv.imread(path + "/" + cat)
-            if img is not None:
-                category.append(img)
-        images[filename] = category
-    return images
+def criar_imagens_dic(folder):
+    dic_img = {}
+    for classe in os.listdir(folder):
+        categoria = []
+        path = os.path.join(folder, classe)
+        for img in os.listdir(path):
+            imagem = cv.imread(path + "/" + img)  
+            categoria.append(imagem)
+        dic_img[classe] = categoria
+    return dic_img                  
 
-images = load_images_from_folder(r'C:\Users\ppgmcs\Desktop\imagens tratadas - final')
+def criar_dic_bounding_boxes(txts, imgs):
+    dic_bb = {}
+    for (classe, images), (classe2, txts) in zip(imgs.items(), txts.items()):
+        categoria = []
+        for (values, image), (values2, txt) in zip(enumerate(images), enumerate(txts)):
+            categoria.append(achar_bounding_boxes(image, txt))
+        dic_bb[classe] = categoria
+    return dic_bb
+    
+txts = criar_dic_txt(r"C:\Users\ppgmcs\Desktop\aplicativo\txtimagens1")
+imgs = criar_imagens_dic(r"C:\Users\ppgmcs\Desktop\aplicativo\imagens tratadas - final")
+dic_bb = criar_dic_bounding_boxes(txts, imgs)
 
-def artefatos_sift(images):
-    sift_vectors = {}
-    descritor_lista = []
-    sift = cv.SIFT_create()
-    for k, value in images.items():
-        features = []
-        for img in value:
-            kp, des = sift.detectAndCompute(img, None)
-            descritor_lista.extend(des)
-            features.append(des)
-        sift_vectors[k] = features
-    return [descritor_lista, sift_vectors]
 
-sifts = artefatos_sift(images)
-lista_descritores = sifts[0]
-lista_features = sifts[1]
-
-kmeans = KMeans(n_clusters=200, n_init= 10)
-lista_descritores = np.array(lista_descritores, dtype=np.float64)
-kmeans.fit(lista_descritores)
-labels = kmeans.labels_
-
-contador = 0 
-dic_hist = {}
-for classe, imagens in lista_features.items(): #cria uma lista com os histogramas para todas as imagens
-    dic_hist[classe] = {}
-    for idx, des_imagem in enumerate(imagens):
-        nmr_des_imagem = len(des_imagem)
-        labels_imagem = []
+class MyDataset(Dataset):
+    def __init__(self, imgs, dic_bb, transforms=None):
+        self.imgs = imgs
+        self.dic_bb = dic_bb
+        self.transforms = transforms
+        self.data = []
+        for classe, imagem in imgs.items():
+            for i, img in enumerate(imagem):
+                bboxes = dic_bb[classe][i]
+                self.data.append((img,bboxes))
+    def __getitem__(self, idx):
+        img, bboxes = self.data[idx]
+        img = cv.cvtColor(img, cv.COLOR_BGR2RGB)
         
-        for _ in range(nmr_des_imagem):
-            labels_imagem.append(labels[contador])
-            contador += 1
         
-        histogram, _ = np.histogram(labels_imagem, bins=range(201))  
+        boxes = []
+        labels = []
+        for (classe, xmin, ymin, xmax, ymax) in bboxes:
+            boxes.append([xmin, ymin, xmax, ymax])
+            labels.append(int(classe))
+
+        boxes = torch.as_tensor(boxes, dtype=torch.float32)
+        labels = torch.as_tensor(labels, dtype=torch.int64)
+
+        target = {"boxes": boxes, "labels": labels}
+
+        if self.transforms:
+            img = self.transforms(img)
+
+        return img, target
+
+    def __len__(self):
+        return len(self.data)
+
+dataset = MyDataset(imgs, dic_bb)
+img, target = dataset[0]
+print(img)
+print(target)
+
+
+
+
+
         
-        dic_hist[classe][idx] = histogram
-
-lista_svm = []
-lista_labels_svm = []
-for k, value in dic_hist.items():
-    for hist in value.values():
-        lista_svm.append(hist)
-        if(k == "CLASSE 1.1"):
-            lista_labels_svm.append(0)
-        elif(k == "CLASSE 1.2"):
-            lista_labels_svm.append(1)
-        elif(k == "CLASSE 2.1"):
-            lista_labels_svm.append(2)
-        elif(k == "CLASSE 2.2"):
-            lista_labels_svm.append(3)
-model = SVC(kernel='linear', C=1.0)
-model.fit(lista_svm, lista_labels_svm)
-img2 = cv.imread(r"C:\Users\ppgmcs\Desktop\teste\imagem_38 classe 2.1.jpg")
-sift = cv.SIFT_create()
-kp, des = sift.detectAndCompute(img2, None)
-
-if des is not None:
-    labels = kmeans.predict(des.astype(np.float64))
-    histograma = np.histogram(labels, bins=range(201))[0]
-    pred = model.predict([histograma.astype(np.float64)])
-    print("Predição:", pred)
-else:
-    print("Nenhum descritor encontrado.")
-
-
+        
+        
+    
